@@ -1,276 +1,389 @@
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify  # Removed unused make_response
 from flask_sqlalchemy import SQLAlchemy
-from flask_bcrypt import Bcrypt
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_bcrypt import Bcrypt  # Ensure flask-bcrypt is installed
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity,get_jwt # Ensure flask-jwt-extended is installed
+from flask_cors import CORS, cross_origin  # Ensure flask-cors is installed
 from datetime import datetime, timedelta
-import os
-import jwt
 
+
+# Initialize Flask app
 app = Flask(__name__)
 
-# Configuration
-app.config['SECRET_KEY'] = 'your_secret_key_here'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hotel.db'
+# Configure Database (SQLite for simplicity)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///booking_system.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = 'your_secret_key'
+app.config['JWT_SECRET_KEY'] = 'your_jwt_secret_key'
 
-# Initialize extensions
+# Initialize Extensions
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
-login_manager = LoginManager(app)
+jwt = JWTManager(app)
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}}, supports_credentials=True)
 
-# Models
-class User(UserMixin, db.Model):
+# User Model
+class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
-    bookings = db.relationship('Booking', backref='user', lazy=True)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(10), default='user')  # 'user' or 'admin'
 
-class Room(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    room_number = db.Column(db.String(10), unique=True, nullable=False)
-    room_type = db.Column(db.String(50), nullable=False)
-    price = db.Column(db.Float, nullable=False)
-    capacity = db.Column(db.Integer, nullable=False)
-    is_available = db.Column(db.Boolean, default=True)
-    bookings = db.relationship('Booking', backref='room', lazy=True)
-
+# Booking Model
 class Booking(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    room_id = db.Column(db.Integer, db.ForeignKey('room.id'), nullable=False)
-    check_in = db.Column(db.DateTime, nullable=False)
-    check_out = db.Column(db.DateTime, nullable=False)
+    check_in = db.Column(db.Date, nullable=False)
+    check_out = db.Column(db.Date, nullable=False)
+    adults = db.Column(db.Integer, nullable=False)
+    children = db.Column(db.Integer, nullable=False)
+    rooms = db.Column(db.JSON, nullable=False)  # Ensure rooms is not nullable
+    promo_code = db.Column(db.String(50), nullable=True)
     total_price = db.Column(db.Float, nullable=False)
-    status = db.Column(db.String(20), default='Pending')
+    status = db.Column(db.String(20), default='pending')  # 'pending', 'approved', 'rejected'
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now())
 
-# User Loader for Flask-Login
-@login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
+class Room(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(50), nullable=False)  # e.g., Deluxe, Standard
+    type = db.Column(db.String(50), nullable=False)  # e.g., Single, Double
+    total = db.Column(db.Integer, nullable=False)  # Total available rooms
+    price = db.Column(db.Float, nullable=False)
+    amenities = db.Column(db.JSON, nullable=False) 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "category": self.category,
+            "type": self.type,
+            "total": self.total,
+            "price": self.price,
+            "amenities": self.amenities,
+        }
 
-# Authentication Routes
+class BookingRoom(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    booking_id = db.Column(db.Integer, db.ForeignKey('booking.id'), nullable=False)
+    room_id = db.Column(db.Integer, db.ForeignKey('room.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+
+def create_admin():
+    admin_email = "admin@booking.com"
+    admin_username = "admin"
+    admin_password = "admin123"  # Change this in production!
+    
+    existing_admin = User.query.filter_by(role='admin').first()
+    if not existing_admin:
+        hashed_password = bcrypt.generate_password_hash(admin_password).decode('utf-8')
+        admin_user = User(username=admin_username, email=admin_email, password=hashed_password, role="admin")
+        db.session.add(admin_user)
+        db.session.commit()
+        print("Admin user created successfully!")
+
+# Create database tables
+with app.app_context():
+    db.create_all()
+    create_admin()
+
+# Register User
 @app.route('/register', methods=['POST'])
 def register():
-    data = request.json
+    data = request.get_json()
+    if User.query.filter_by(email=data['email']).first():
+        return jsonify({"error": "Email already exists"}), 400
+    
     hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-    
-    new_user = User(
-        username=data['username'], 
-        email=data['email'], 
-        password=hashed_password
-    )
-    
-    try:
-        db.session.add(new_user)
-        db.session.commit()
-        return jsonify({'message': 'User registered successfully'}), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 400
+    new_user = User(username=data['username'], email=data['email'], password=hashed_password)
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({"message": "User registered successfully"}), 201
 
+# Login User
 @app.route('/login', methods=['POST'])
+@cross_origin(origins="http://localhost:5173")
 def login():
-    data = request.json
-    user = User.query.filter_by(username=data['username']).first()
-    
+    data = request.get_json()
+    user = User.query.filter_by(email=data['email']).first()
     if user and bcrypt.check_password_hash(user.password, data['password']):
-        login_user(user)
-        token = jwt.encode({
-            'user_id': user.id, 
-            'exp': datetime.utcnow() + timedelta(hours=24)
-        }, app.config['SECRET_KEY'])
-        
-        return jsonify({
-            'message': 'Login successful', 
-            'token': token,
-            'user_id': user.id,
-            'is_admin': user.is_admin
-        }), 200
+        # Convert user.id to string to comply with JWT standards
+        access_token = create_access_token(
+            identity=str(user.id),  # Convert to string
+            additional_claims={"role": user.role},
+            expires_delta=timedelta(hours=1)
+        )
+        return jsonify({"token": access_token}), 200
+
+    return jsonify({"error": "Invalid credentials"}), 401
+
+
+# Get Dashboard Metrics
+@app.route('/dashboard', methods=['GET'])
+@jwt_required()
+def dashboard():
+    user = get_jwt_identity()
+    user = get_jwt_identity()
+    if user.get('role') != 'admin':  # Use .get() to safely access the role
     
-    return jsonify({'error': 'Invalid credentials'}), 401
+        total_users = User.query.count()
+        total_bookings = Booking.query.count()
+        total_revenue = db.session.query(db.func.sum(Booking.total_price)).scalar() or 0
+        active_users = User.query.count()  # Placeholder, refine based on activity
+    
+    return jsonify({
+        "totalUsers": total_users,
+        "totalBookings": total_bookings,
+        "totalRevenue": total_revenue,
+        "activeUsers": active_users
+    }), 200
 
-@app.route('/logout', methods=['POST'])
-@login_required
-def logout():
-    logout_user()
-    return jsonify({'message': 'Logged out successfully'}), 200
-
-# Room Management Routes
 @app.route('/rooms', methods=['POST'])
-@login_required
-def create_room():
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
+@jwt_required()
+def add_room():
+
+    user_role = get_jwt()["role"]  # Get role from claims
     
-    data = request.json
+    if user_role != 'admin':
+        return jsonify({"error": "Unauthorized"}), 403
+
+    data = request.get_json()
+    print("Received data:", data)  # Debugging line
+
+    # Validate input
+    if not isinstance(data.get('category'), str) or len(data['category']) == 0:
+        return jsonify({"error": "Category must be a non-empty string"}), 400
+    if not isinstance(data.get('type'), str) or len(data['type']) == 0:
+        return jsonify({"error": "Type must be a non-empty string"}), 400
+    if not isinstance(data.get('total'), int) or data['total'] <= 0:
+        return jsonify({"error": "Total must be a positive integer"}), 400
+    if not isinstance(data.get('price', 100), (int, float)) or data['price'] <= 0:
+        return jsonify({"error": "Price must be a positive number"}), 400
+    if not isinstance(data.get('amenities', []), list):
+        return jsonify({"error": "Amenities must be a list"}), 400
+
+    # Create new room
     new_room = Room(
-        room_number=data['room_number'],
-        room_type=data['room_type'],
-        price=data['price'],
-        capacity=data['capacity']
+        category=data['category'],
+        type=data['type'],
+        total=data['total'],
+        price=data.get('price'),
+        amenities=data.get('amenities')
     )
-    
+
     try:
         db.session.add(new_room)
         db.session.commit()
-        return jsonify({'message': 'Room created successfully'}), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 400
+        return jsonify({"error": "Failed to add room", "details": str(e)}), 500
 
-@app.route('/rooms/available', methods=['GET'])
-def get_available_rooms():
-    check_in = datetime.strptime(request.args.get('check_in'), '%Y-%m-%d')
-    check_out = datetime.strptime(request.args.get('check_out'), '%Y-%m-%d')
-    
-    # Find rooms not booked in the specified date range
-    booked_room_ids = db.session.query(Booking.room_id).filter(
-        (Booking.check_in < check_out) & (Booking.check_out > check_in)
-    ).all()
-    
-    available_rooms = Room.query.filter(
-        Room.id.notin_([room_id for (room_id,) in booked_room_ids])
-    ).all()
-    
-    return jsonify([{
-        'id': room.id,
-        'room_number': room.room_number,
-        'room_type': room.room_type,
-        'price': room.price,
-        'capacity': room.capacity
-    } for room in available_rooms]), 200
+    return jsonify({
+        "message": "Room added successfully",
+        "room": new_room.to_dict()
+    }), 201
 
-# Booking Routes
-@app.route('/bookings', methods=['POST'])
-@login_required
+rooms = [
+    # Standard Rooms
+    {"category": "Standard", "type": "Single", "total": 15, "price": 100.0, "amenities": ["WiFi"]},
+    {"category": "Standard", "type": "Double", "total": 12, "price": 130.0, "amenities": ["WiFi", "TV"]},
+    {"category": "Standard", "type": "Triple", "total": 8, "price": 160.0, "amenities": ["WiFi", "TV", "Air Conditioning"]},
+    {"category": "Standard", "type": "Family", "total": 5, "price": 200.0, "amenities": ["WiFi", "TV", "Air Conditioning", "Mini Fridge"]},
+
+    # Deluxe Rooms
+    {"category": "Deluxe", "type": "Single", "total": 10, "price": 150.0, "amenities": ["WiFi", "TV"]},
+    {"category": "Deluxe", "type": "Double", "total": 8, "price": 200.0, "amenities": ["WiFi", "TV", "Mini Bar"]},
+    {"category": "Deluxe", "type": "Triple", "total": 6, "price": 250.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony"]},
+    {"category": "Deluxe", "type": "Family", "total": 4, "price": 300.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Coffee Maker"]},
+
+    # Suite Rooms
+    {"category": "Suite", "type": "Single", "total": 5, "price": 300.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony"]},
+    {"category": "Suite", "type": "Double", "total": 4, "price": 450.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Kitchen"]},
+    {"category": "Suite", "type": "Executive", "total": 3, "price": 600.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Kitchen", "Office Desk"]},
+    {"category": "Suite", "type": "Penthouse", "total": 2, "price": 750.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Kitchen", "Office Desk", "Jacuzzi"]},
+
+    # Presidential Suites
+    {"category": "Presidential", "type": "Single", "total": 2, "price": 800.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Jacuzzi", "Private Pool"]},
+    {"category": "Presidential", "type": "Double", "total": 2, "price": 1200.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Jacuzzi", "Private Pool", "Personal Butler"]},
+    {"category": "Presidential", "type": "Royal", "total": 1, "price": 1800.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Jacuzzi", "Private Pool", "Personal Butler", "Private Chef"]},
+    {"category": "Presidential", "type": "Penthouse", "total": 1, "price": 2500.0, "amenities": ["WiFi", "TV", "Mini Bar", "Balcony", "Jacuzzi", "Private Pool", "Personal Butler", "Private Chef", "Home Theater"]},
+]
+
+
+@app.route('/rooms', methods=['GET'])
+def get_rooms():
+    rooms = Room.query.all()
+    rooms_list = [room.to_dict() for room in rooms]  # Convert Room objects to dictionaries
+    return jsonify(rooms_list), 200
+
+
+with app.app_context():
+    for room in rooms:
+        existing_room = Room.query.filter_by(category=room["category"], type=room["type"]).first()
+        if not existing_room:
+            new_room = Room(**room)
+            db.session.add(new_room)
+    db.session.commit()
+    print("Rooms added successfully!")
+
+
+#Add booking
+# Fix booking creation to include user ID
+@app.route('/booking', methods=['POST'])
+@jwt_required()
 def create_booking():
+    user_id = int(get_jwt_identity())
+    # Extract user_id correctly depending on token structure
+
+    
     data = request.json
-    
-    # Check room availability
-    conflicting_bookings = Booking.query.filter(
-        Booking.room_id == data['room_id'],
-        (Booking.check_in < datetime.strptime(data['check_out'], '%Y-%m-%d')) & 
-        (Booking.check_out > datetime.strptime(data['check_in'], '%Y-%m-%d'))
-    ).all()
-    
-    if conflicting_bookings:
-        return jsonify({'error': 'Room not available for selected dates'}), 400
-    
-    room = Room.query.get(data['room_id'])
-    
-    # Calculate total price
-    check_in = datetime.strptime(data['check_in'], '%Y-%m-%d')
-    check_out = datetime.strptime(data['check_out'], '%Y-%m-%d')
-    nights = (check_out - check_in).days
-    total_price = room.price * nights
-    
+
+    check_in_date = datetime.strptime(data['check_in'], "%Y-%m-%d").date()
+    check_out_date = datetime.strptime(data['check_out'], "%Y-%m-%d").date()
+    if check_in_date >= check_out_date:
+        return jsonify({"error": "Check-out date must be after check-in date"}), 400
+
+    if not data.get('rooms'):
+        return jsonify({"error": "No rooms selected"}), 400
+
+    total_price = sum(room["price"] * room["quantity"] for room in data["rooms"])
+
     new_booking = Booking(
-        user_id=current_user.id,
-        room_id=data['room_id'],
-        check_in=check_in,
-        check_out=check_out,
+        user_id=user_id,
+        check_in=check_in_date,
+        check_out=check_out_date,
+        adults=data['adults'],
+        children=data['children'],
+        rooms=data['rooms'],
+        promo_code=data.get('promoCode'),
         total_price=total_price
     )
-    
-    try:
-        db.session.add(new_booking)
-        db.session.commit()
-        return jsonify({
-            'message': 'Booking created successfully', 
-            'booking_id': new_booking.id,
-            'total_price': total_price
-        }), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 400
 
-@app.route('/bookings/checkin/<int:booking_id>', methods=['POST'])
-@login_required
-def check_in_booking(booking_id):
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
-    booking = Booking.query.get_or_404(booking_id)
-    booking.status = 'Checked In'
-    
-    try:
-        db.session.commit()
-        return jsonify({'message': 'Checked in successfully'}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 400
+    db.session.add(new_booking)
+    db.session.commit()
 
-@app.route('/bookings/checkout/<int:booking_id>', methods=['POST'])
-@login_required
-def check_out_booking(booking_id):
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
-    booking = Booking.query.get_or_404(booking_id)
-    booking.status = 'Checked Out'
-    booking.room.is_available = True
-    
-    try:
-        db.session.commit()
-        return jsonify({'message': 'Checked out successfully'}), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 400
+    for room in data["rooms"]:
+        db.session.add(BookingRoom(booking_id=new_booking.id, room_id=room["id"], quantity=room["quantity"], price=room["price"]))
 
-# Analytics Routes
-@app.route('/analytics/revenue', methods=['GET'])
-@login_required
-def get_revenue_analytics():
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required'}), 403
-    
-    # Total revenue
-    total_revenue = db.session.query(
-        db.func.sum(Booking.total_price)
-    ).scalar() or 0
-    
-    # Bookings by status
-    bookings_by_status = db.session.query(
-        Booking.status, 
-        db.func.count(Booking.id)
-    ).group_by(Booking.status).all()
-    
-    # Revenue by room type
-    revenue_by_room_type = db.session.query(
-        Room.room_type, 
-        db.func.sum(Booking.total_price)
-    ).join(Booking).group_by(Room.room_type).all()
-    
-    return jsonify({
-        'total_revenue': total_revenue,
-        'bookings_by_status': dict(bookings_by_status),
-        'revenue_by_room_type': dict(revenue_by_room_type)
-    }), 200
+    db.session.commit()
+    return jsonify({"message": "Booking successful!", "booking_id": new_booking.id}), 201
 
-# Initialize Database
-with app.app_context():
-    db.create_all()
+@app.route('/bookings', methods=['GET'])
+def get_bookings():
+    """Retrieve all bookings"""
 
-
-# Main Block
-if __name__ == '__main__':
-    # Create admin user if not exists
-    with app.app_context():
-        admin_username = 'admin'
-        existing_admin = User.query.filter_by(username=admin_username).first()
+    bookings = Booking.query.all()  # Admin can see all bookings
+    bookings_data = []
+    
+    for booking in bookings:
+        # Get user info
+        user = User.query.get(booking.user_id)
+        guest_name = user.username if user else "Unknown"
         
-        if not existing_admin:
-            hashed_password = bcrypt.generate_password_hash('admin_password').decode('utf-8')
-            admin_user = User(
-                username=admin_username, 
-                email='admin@hotel.com', 
-                password=hashed_password,
-                is_admin=True
-            )
-            db.session.add(admin_user)
-            db.session.commit()
-            print("Admin user created successfully")
+        bookings_data.append({
+            "id": booking.id,
+            "user_id": booking.user_id,
+            "guest": guest_name,
+            "check_in": booking.check_in.strftime("%Y-%m-%d"),
+            "check_out": booking.check_out.strftime("%Y-%m-%d"),
+            "status": booking.status,
+            "total_price": booking.total_price,
+            "rooms": [
+                {
+                    "room_id": room["id"],
+                    "room_number": room.get("number", "N/A"),
+                    "room_type": room.get("type", "N/A"),
+                    "price_per_night": room.get("price", 0.0)
+                }
+                for room in booking.rooms
+            ]
+        })
+
+    return jsonify(bookings_data), 200
+
+
+
+# Approve/Reject Booking
+@app.route('/bookings/<int:booking_id>/status', methods=['PUT'])
+@jwt_required()
+def update_booking_status(booking_id):
+    user = get_jwt_identity()
+    if user['role'] != 'admin':
+        return jsonify({"error": "Unauthorized"}), 403
     
+    data = request.get_json()
+    booking = Booking.query.get(booking_id)
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+    
+    booking.status = data['status']
+    db.session.commit()
+    return jsonify({"message": "Booking updated successfully"}), 200
+
+# Add these routes to app.py
+
+# Get all guests
+@app.route('/guests', methods=['GET'])
+def get_guests():
+    """Retrieve all guests with booking summary data"""
+    
+    # Get all users who have bookings (excluding admin users)
+    users_with_bookings = db.session.query(User).join(
+        Booking, User.id == Booking.user_id
+    ).filter(User.role != 'admin').distinct().all()
+    
+    guest_data = []
+    
+    for user in users_with_bookings:
+        # Get all bookings for this user
+        user_bookings = Booking.query.filter_by(user_id=user.id).all()
+        
+        # Calculate booking count
+        booking_count = len(user_bookings)
+        
+        # Get most recent stay date
+        last_stay = max([booking.check_out for booking in user_bookings]) if user_bookings else None
+        
+        # Format the date
+        last_stay_formatted = last_stay.strftime("%B %Y") if last_stay else "N/A"
+        
+        # Get all booking IDs
+        booking_ids = [booking.id for booking in user_bookings]
+        
+        guest_data.append({
+            "id": user.id,
+            "name": user.username,
+            "email": user.email,
+            "bookingCount": booking_count,
+            "lastStay": last_stay_formatted,
+            "bookingIds": booking_ids
+        })
+    
+    return jsonify(guest_data), 200
+
+# Get guest bookings by guest ID
+@app.route('/guests/<int:guest_id>/bookings', methods=['GET'])
+def get_guest_bookings(guest_id):
+    """Retrieve all bookings for a specific guest"""
+    
+    # Check if user exists
+    user = db.session.get(User, guest_id)
+    if not user:
+        return jsonify({"error": "Guest not found"}), 404
+    
+    # Get all bookings for this user
+    user_bookings = Booking.query.filter_by(user_id=guest_id).all()
+    
+    bookings_data = []
+    for booking in user_bookings:
+        bookings_data.append({
+            "id": booking.id,
+            "check_in": booking.check_in.strftime("%Y-%m-%d"),
+            "check_out": booking.check_out.strftime("%Y-%m-%d"),
+            "status": booking.status,
+            "total_price": booking.total_price,
+            "rooms": booking.rooms
+        })
+    
+    return jsonify(bookings_data), 200
+
+if __name__ == '__main__':
     app.run(debug=True)

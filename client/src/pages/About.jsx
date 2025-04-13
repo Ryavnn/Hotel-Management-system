@@ -3,8 +3,8 @@ import Navbar from "../components/Navbar";
 
 const AboutUsPage = () => {
   return (
-      <div className="about-page">
-          <Navbar />
+    <div className="about-page">
+      <Navbar />
       {/* Hero Section */}
       <div className="hero-section">
         <h1>About Our Hotel</h1>
@@ -19,7 +19,7 @@ const AboutUsPage = () => {
         <div className="story-content">
           <h2>Our Story</h2>
           <p>
-            Founded in 2005, our hotel has been a beacon of hospitality and
+            Founded in 2025, our hotel has been a beacon of hospitality and
             comfort for travelers from around the world. What started as a small
             family-owned establishment has grown into a premier destination for
             both leisure and business travelers.
@@ -30,7 +30,10 @@ const AboutUsPage = () => {
           </p>
         </div>
         <div className="story-image">
-          <img src="/api/placeholder/600/400" alt="Hotel Exterior" />
+          <img
+            src="https://media.istockphoto.com/id/104731717/photo/luxury-resort.jpg?s=612x612&w=0&k=20&c=cODMSPbYyrn1FHake1xYz9M8r15iOfGz9Aosy9Db7mI="
+            alt="Hotel Exterior"
+          />
         </div>
       </div>
 

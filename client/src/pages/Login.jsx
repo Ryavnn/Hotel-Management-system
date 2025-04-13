@@ -1,5 +1,6 @@
 import { useState } from "react";
-//import { User, Lock, Mail, Facebook, Google, Github } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { jwtDecode } from "jwt-decode";
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -10,6 +11,8 @@ const AuthPage = () => {
     confirmPassword: "",
   });
 
+  const navigate = useNavigate(); // Initialize useNavigate
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prevState) => ({
@@ -18,15 +21,56 @@ const AuthPage = () => {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (isLogin) {
       // Login logic
-      console.log("Login submitted:", {
-        email: formData.email,
-        password: formData.password,
-      });
+      try {
+        const response = await fetch("http://localhost:5000/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: formData.email,
+            password: formData.password,
+          }),
+        });
+
+        const data = await response.json();
+        console.log("Login API response:", data);
+
+        if (!response.ok) {
+          throw new Error(data.message || "Invalid login credentials");
+        }
+
+        if (!data.token) {
+          throw new Error("Token not received from server");
+        }
+
+        localStorage.setItem("token", data.token); // Store the token
+        console.log("Login successful, token stored.");
+
+        // Decode the JWT token to get user role
+        const tokenPayload = jwtDecode(data.token);
+        console.log("Decoded Token:", tokenPayload);
+
+        // The role is now in claims, not in sub
+        const userRole = tokenPayload.role;
+
+        // Redirect based on user role
+        if (userRole === "admin") {
+          console.log("Navigating to dashboard");
+          navigate("/dashboard");
+        } else {
+          console.log("Navigating to /...");
+          navigate("/");
+        }
+      } catch (error) {
+        console.error("Login error:", error);
+        alert(error.message);
+      }
     } else {
       // Registration logic
       if (formData.password !== formData.confirmPassword) {
@@ -34,17 +78,33 @@ const AuthPage = () => {
         return;
       }
 
-      console.log("Registration submitted:", {
-        username: formData.username,
-        email: formData.email,
-        password: formData.password,
-      });
-    }
-  };
+      try {
+        const response = await fetch("http://localhost:5000/register", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username: formData.username,
+            email: formData.email,
+            password: formData.password,
+          }),
+        });
 
-  const handleSocialLogin = (platform) => {
-    console.log(`Logging in with ${platform}`);
-    // Implement social login logic
+        const data = await response.json();
+        console.log("Registration API response:", data);
+
+        if (!response.ok) {
+          throw new Error(data.message || "Registration failed");
+        }
+
+        alert("Account created! Please log in.");
+        setIsLogin(true); // Switch to login view
+      } catch (error) {
+        console.error("Registration error:", error);
+        alert(error.message);
+      }
+    }
   };
 
   return (
@@ -54,7 +114,7 @@ const AuthPage = () => {
           <h1>{isLogin ? "Welcome Back" : "Create Account"}</h1>
           <p>
             {isLogin
-              ? "Please login to your account"
+              ? "Please log in to your account"
               : "Sign up to start your journey"}
           </p>
         </div>
@@ -141,30 +201,6 @@ const AuthPage = () => {
             {isLogin ? "Login" : "Create Account"}
           </button>
         </form>
-
-        <div className="social-login">
-          <p>Or continue with</p>
-          <div className="social-buttons">
-            <button
-              className="social-button"
-              onClick={() => handleSocialLogin("Facebook")}
-            >
-                          {/*<Facebook />*/}
-            </button>
-            <button
-              className="social-button"
-              onClick={() => handleSocialLogin("Google")}
-            >
-                          {/*<Google />*/}
-            </button>
-            <button
-              className="social-button"
-              onClick={() => handleSocialLogin("Github")}
-            >
-                          {/*<Github />*/}
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

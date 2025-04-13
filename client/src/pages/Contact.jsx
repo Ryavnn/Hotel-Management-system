@@ -51,11 +51,11 @@ const ContactUsPage = () => {
           <div className="contact-details">
             <p>
               <MapPin />
-              123 Hospitality Lane, City, Country
+              123 Hotel Lane, Nairobi, Kenya
             </p>
             <p>
               <Phone />
-              +1 (555) 123-4567
+              +254 (071) 234-5678
             </p>
             <p>
               <Mail />
