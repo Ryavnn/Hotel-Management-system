@@ -82,8 +82,32 @@ const HotelAdminDashboard = () => {
 
 
 
+const handleCheckIn = async (bookingId) => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      alert("You must be logged in to perform this action");
+      return;
+    }
 
-  const handleCheckIn = (bookingId) => {
+    const response = await fetch(
+      `http://localhost:5000/bookings/${bookingId}/status`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: "Checked In" }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to update booking status");
+    }
+
+    // Update local state if API call succeeds
     setBookings((prevBookings) =>
       prevBookings.map((booking) =>
         booking.id === bookingId
@@ -91,9 +115,38 @@ const HotelAdminDashboard = () => {
           : booking
       )
     );
-  };
+  } catch (error) {
+    console.error("Error updating booking status:", error);
+    alert("Error updating booking status: " + error.message);
+  }
+};
 
-  const handleCheckOut = (bookingId) => {
+const handleCheckOut = async (bookingId) => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      alert("You must be logged in to perform this action");
+      return;
+    }
+
+    const response = await fetch(
+      `http://localhost:5000/bookings/${bookingId}/status`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: "Checked Out" }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to update booking status");
+    }
+
+    // Update local state if API call succeeds
     setBookings((prevBookings) =>
       prevBookings.map((booking) =>
         booking.id === bookingId
@@ -101,7 +154,11 @@ const HotelAdminDashboard = () => {
           : booking
       )
     );
-  };
+  } catch (error) {
+    console.error("Error updating booking status:", error);
+    alert("Error updating booking status: " + error.message);
+  }
+};
 
   const handleAddRoom = async () => {
     if (!newRoom.category || !newRoom.type || newRoom.total <= 0) {
@@ -185,6 +242,34 @@ useEffect(() => {
 
   fetchBookings();
 }, []);
+  
+  
+useEffect(() => {
+  const fetchAnalyticsData = async () => {
+    try {
+      const response = await fetch("http://localhost:5000/analytics");
+      if (!response.ok) throw new Error("Failed to load analytics data");
+      const data = await response.json();
+      setAnalyticsData(data);
+    } catch (error) {
+      console.error("Error fetching analytics data:", error);
+      // Set default data in case of error
+      setAnalyticsData({
+        roomOccupancy: [
+          { name: "Standard", value: 0 },
+          { name: "Deluxe", value: 0 },
+          { name: "Suite", value: 0 },
+          { name: "Presidential", value: 0 },
+        ],
+        revenueByRoomType: [],
+      });
+    }
+  };
+
+  if (activeTab === "analytics") {
+    fetchAnalyticsData();
+  }
+}, [activeTab]);
 
 
 
@@ -222,15 +307,18 @@ useEffect(() => {
                 <td>{booking.check_out}</td>
                 <td>{booking.status}</td>
                 <td>
-                  {booking.status !== "Checked In" && (
+                  {booking.status === "Checked Out" ? (
+                    <button className="btn btn-gray" disabled>
+                      Completed
+                    </button>
+                  ) : booking.status !== "Checked In" ? (
                     <button
                       onClick={() => handleCheckIn(booking.id)}
                       className="btn btn-green"
                     >
                       Check In
                     </button>
-                  )}
-                  {booking.status === "Checked In" && (
+                  ) : (
                     <button
                       onClick={() => handleCheckOut(booking.id)}
                       className="btn btn-red"
@@ -365,17 +453,20 @@ useEffect(() => {
     </div>
   );
 
-  const renderAnalyticsTab = () => (
-    <div className="card">
-      <div className="card-header">
-        <h2>Hotel Analytics</h2>
-      </div>
-      <div className="card-content analytics">
-        <div className="analytics-section">
-          <h3>Room Occupancy</h3>
-          <div className="chart-placeholder">
-            <p>Room Occupancy Breakdown:</p>
-            {analyticsData.roomOccupancy.map((data, index) => (
+const renderAnalyticsTab = () => (
+  <div className="card">
+    <div className="card-header">
+      <h2>Hotel Analytics</h2>
+    </div>
+    <div className="card-content analytics">
+      <div className="analytics-section">
+        <h3>Room Occupancy</h3>
+        <div className="chart-placeholder">
+          <p>Room Occupancy Breakdown:</p>
+          {analyticsData.roomOccupancy.length === 0 ? (
+            <p>Loading occupancy data...</p>
+          ) : (
+            analyticsData.roomOccupancy.map((data, index) => (
               <div key={index} className="occupancy-item">
                 <span>{data.name}</span>
                 <div className="occupancy-bar">
@@ -387,12 +478,16 @@ useEffect(() => {
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+            ))
+          )}
         </div>
-        <div className="analytics-section">
-          <h3>Revenue by Room Type</h3>
-          <div className="chart-placeholder">
+      </div>
+      <div className="analytics-section">
+        <h3>Revenue by Room Type</h3>
+        <div className="chart-placeholder">
+          {analyticsData.revenueByRoomType.length === 0 ? (
+            <p>Loading revenue data...</p>
+          ) : (
             <table className="revenue-table">
               <thead>
                 <tr>
@@ -407,19 +502,20 @@ useEffect(() => {
                 {analyticsData.revenueByRoomType.map((data, index) => (
                   <tr key={index}>
                     <td>{data.name}</td>
-                    <td>${data.Standard}</td>
-                    <td>${data.Deluxe}</td>
-                    <td>${data.Suite}</td>
-                    <td>${data.Presidential}</td>
+                    <td>${data.Standard.toLocaleString()}</td>
+                    <td>${data.Deluxe.toLocaleString()}</td>
+                    <td>${data.Suite.toLocaleString()}</td>
+                    <td>${data.Presidential.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          )}
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 const renderGuestsTab = () => (
   <div className="card">
     <div className="card-header">

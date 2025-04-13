@@ -305,8 +305,11 @@ def get_bookings():
 @app.route('/bookings/<int:booking_id>/status', methods=['PUT'])
 @jwt_required()
 def update_booking_status(booking_id):
-    user = get_jwt_identity()
-    if user['role'] != 'admin':
+    # Fix how we get the role from JWT claims
+    claims = get_jwt()
+    user_role = claims.get('role')
+    
+    if user_role != 'admin':
         return jsonify({"error": "Unauthorized"}), 403
     
     data = request.get_json()
@@ -317,8 +320,6 @@ def update_booking_status(booking_id):
     booking.status = data['status']
     db.session.commit()
     return jsonify({"message": "Booking updated successfully"}), 200
-
-# Add these routes to app.py
 
 # Get all guests
 @app.route('/guests', methods=['GET'])
@@ -384,6 +385,116 @@ def get_guest_bookings(guest_id):
         })
     
     return jsonify(bookings_data), 200
+
+# Add this route to app.py
+
+@app.route('/analytics', methods=['GET'])
+def get_analytics():
+    """Retrieve analytics data for the dashboard"""
+    
+    # Calculate room occupancy
+    room_occupancy = []
+    room_categories = db.session.query(Room.category).distinct().all()
+    
+    for category in room_categories:
+        category_name = category[0]
+        
+        # Get total rooms for this category
+        total_rooms = db.session.query(db.func.sum(Room.total)).filter(Room.category == category_name).scalar() or 0
+        
+        # Get active bookings for this category
+        active_bookings = 0
+        current_date = datetime.now().date()
+        
+        # Count rooms in active bookings (where current date is between check-in and check-out)
+        bookings = Booking.query.filter(
+            Booking.check_in <= current_date,
+            Booking.check_out >= current_date
+        ).all()
+        
+        for booking in bookings:
+            for room in booking.rooms:
+                if room.get('category') == category_name:
+                    active_bookings += room.get('quantity', 0)
+        
+        # Calculate occupancy percentage
+        occupancy_percentage = (active_bookings / total_rooms * 100) if total_rooms > 0 else 0
+        
+        room_occupancy.append({
+            "name": category_name,
+            "value": round(occupancy_percentage, 1)
+        })
+    
+    # Calculate revenue by room type for the last 6 months
+    revenue_by_room_type = []
+    
+    # Get last 6 months
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=180)
+    
+    # Generate month labels
+    months = []
+    current_date = start_date
+    while current_date <= end_date:
+        months.append(current_date.strftime("%b %Y"))
+        # Move to next month
+        if current_date.month == 12:
+            current_date = current_date.replace(year=current_date.year + 1, month=1)
+        else:
+            current_date = current_date.replace(month=current_date.month + 1)
+    
+    # Get monthly revenue by category
+    for month in months:
+        month_obj = datetime.strptime(month, "%b %Y")
+        month_start = month_obj.replace(day=1)
+        # Calculate month end
+        if month_obj.month == 12:
+            month_end = month_obj.replace(year=month_obj.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            month_end = month_obj.replace(month=month_obj.month + 1, day=1) - timedelta(days=1)
+        
+        # Create monthly revenue object
+        monthly_revenue = {
+            "name": month,
+            "Standard": 0,
+            "Deluxe": 0,
+            "Suite": 0,
+            "Presidential": 0
+        }
+        
+        # Get bookings for this month
+        bookings = Booking.query.filter(
+            Booking.check_in <= month_end,
+            Booking.check_out >= month_start
+        ).all()
+        
+        for booking in bookings:
+            # Calculate the number of nights in this month
+            stay_start = max(booking.check_in, month_start.date())
+            stay_end = min(booking.check_out, month_end.date())
+            nights_in_month = (stay_end - stay_start).days + 1
+            
+            # Distribute revenue across room categories
+            for room in booking.rooms:
+                category = room.get('category', 'Standard')  # Default to Standard if not specified
+                if category in monthly_revenue:
+                    # Calculate prorated revenue for this month
+                    room_price = room.get('price', 0)
+                    room_quantity = room.get('quantity', 0)
+                    daily_revenue = room_price * room_quantity
+                    category_revenue = daily_revenue * nights_in_month
+                    monthly_revenue[category] += category_revenue
+        
+        # Round revenue values
+        for category in ["Standard", "Deluxe", "Suite", "Presidential"]:
+            monthly_revenue[category] = round(monthly_revenue[category], 2)
+            
+        revenue_by_room_type.append(monthly_revenue)
+    
+    return jsonify({
+        "roomOccupancy": room_occupancy,
+        "revenueByRoomType": revenue_by_room_type
+    }), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
