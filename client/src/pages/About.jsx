@@ -43,17 +43,17 @@ const AboutUsPage = () => {
         <div className="team-grid">
           {[
             {
-              name: "Emily Richards",
+              name: "Victory Mburu",
               role: "General Manager",
               image: "/api/placeholder/300/300",
             },
             {
-              name: "Michael Chen",
+              name: "Ryan Njoroge",
               role: "Chief Operations Officer",
               image: "/api/placeholder/300/300",
             },
             {
-              name: "Sarah Thompson",
+              name: "Sarah Karanja",
               role: "Guest Experience Director",
               image: "/api/placeholder/300/300",
             },

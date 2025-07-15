@@ -1,8 +1,8 @@
-from flask import Flask, request, jsonify  # Removed unused make_response
+from flask import Flask, request, jsonify  
 from flask_sqlalchemy import SQLAlchemy
-from flask_bcrypt import Bcrypt  # Ensure flask-bcrypt is installed
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity,get_jwt # Ensure flask-jwt-extended is installed
-from flask_cors import CORS, cross_origin  # Ensure flask-cors is installed
+from flask_bcrypt import Bcrypt  
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity,get_jwt 
+from flask_cors import CORS, cross_origin  
 from datetime import datetime, timedelta
 
 
@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 
 # Configure Database (SQLite for simplicity)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///booking_system.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:admin@localhost:5433/hotel_management'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'your_secret_key'
 app.config['JWT_SECRET_KEY'] = 'your_jwt_secret_key'

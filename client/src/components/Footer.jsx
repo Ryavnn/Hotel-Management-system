@@ -8,17 +8,16 @@ function Footer() {
               <p>navigate</p>
               <li>Contact us</li>
               <li>FAQs</li>
-              <li>Return & Exchange</li>
-              <li>Shipping Information</li>
-              <li>Track your order</li>
+              <li>Cancel booking</li>
+              <li>Reserve a stay</li>
+              <li>Track your stay</li>
             </ul>
           </div>
           <div className="column-2">
             <p>Footer links</p>
             <ul className="explore footer-links">
               <li>Categories</li>
-              <li>Brands</li>
-              <li>New arrivals</li>
+              <li>Rooms</li>
               <li>Best Sellers</li>
               <li>Special Offers</li>
             </ul>

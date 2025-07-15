@@ -18,7 +18,7 @@ function Navbar() {
   return (
     <nav className="nav-bar">
       <div className="logo">
-        <h1>Furniture</h1>
+        <h1>Hotel Manager</h1>
       </div>
       <div className="center-nav">
         <ul className="short-links">
